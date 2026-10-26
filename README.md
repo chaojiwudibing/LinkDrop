@@ -1,52 +1,58 @@
 # LinkDrop
 
-Mac 菜单栏视频与图集下载工具。复制分享文案，按 **Control + Option + V** 呼出，解析后保存到本机。
+**English** | [简体中文](README.zh-CN.md)
 
-支持抖音、小红书、TikTok、YouTube 和 Instagram。抖音、小红书由本机解析器处理，其余平台使用 yt-dlp；不使用第三方解析中转服务。
+A macOS menu bar app for saving videos and image collections. Copy a share link or share text, press **Control + Option + V**, resolve the link, and save the media locally.
 
-## 本机构建
+Supports **Douyin, Xiaohongshu (RedNote), TikTok, YouTube, and Instagram**. Douyin and Xiaohongshu use local parsers; the other platforms use yt-dlp. No third-party parsing service is involved.
 
-需要 macOS、Xcode Command Line Tools、Python 3.11+、Node.js 和 FFmpeg。已在 Apple Silicon Mac 上验证。安装依赖示例（已有 Homebrew）：
+## Build locally
+
+Requires macOS, Xcode Command Line Tools, Python 3.11+, Node.js, and FFmpeg. Tested on an Apple Silicon Mac. If you already have Homebrew, install the prerequisites with:
 
 ```sh
 xcode-select --install
 brew install python node ffmpeg
 ```
 
-在仓库目录运行：
+From the repository directory, run:
 
 ```sh
 ./build.sh
 open build/LinkDrop.app
 ```
 
-若命令不在 PATH，可通过 `PYTHON_BIN`、`NODE_BIN`、`FFMPEG_BIN` 指定可执行文件绝对路径。
+If an executable is not on your PATH, set `PYTHON_BIN`, `NODE_BIN`, or `FFMPEG_BIN` to its absolute path.
 
-构建结果依赖本仓库的 `.venv` 和本机 Node/FFmpeg，请保留仓库位置，不要将此构建当作可移植安装包分发。应用采用本地 ad-hoc 签名，未经过 Apple 公证。本仓库暂不提供二进制 Release。
+The built app depends on this checkout's `.venv` and your local Node/FFmpeg installations. Keep the checkout in place; this build is not a portable app bundle. The app is ad-hoc signed locally and is not notarized by Apple. No binary release is currently provided.
 
-## 使用
+## Usage
 
-1. 启动应用，点击菜单栏下载图标或按 `Control + Option + V`。
-2. 粘贴完整分享文案，点击「解析链接」。
-3. 点击「下载全部」，文件保存到 `~/Downloads/LinkDrop`。
+The app interface is currently in Chinese.
 
-图集逐张保存并自动生成 ZIP；关闭窗口后保留菜单栏图标。只处理单条作品链接，不抓取账号主页。不会后台自动读取剪贴板，没有开机自启和自动更新。
+1. Launch the app, then click the download icon in the menu bar or press `Control + Option + V`.
+2. Paste the full share text or link and click **解析链接** (Resolve link).
+3. Click **下载全部** (Download all). Files are saved to `~/Downloads/LinkDrop`.
 
-TikTok / YouTube / Instagram 需要时可手动勾选使用 Chrome 登录状态。此选项默认关闭、记住用户选择；可能触发 macOS 钥匙串授权。登录数据由本机引擎使用，不发送给第三方解析网站。解析结果在本机缓存五分钟。不要将缓存、浏览器数据或下载结果提交到 GitHub。
+Images are saved individually, and image collections are also packaged into a ZIP. Closing the window keeps the app in the menu bar. The app handles one post at a time, not entire account profiles. It does not automatically read the clipboard in the background, launch at login, or update itself.
 
-## 验证与限制
+For TikTok, YouTube, and Instagram, you can optionally enable the use of your Chrome login session. This option is off by default and remembers your choice. macOS may request Keychain authorization. Login data is used by the local engine and is not sent to third-party parsing services. Resolved metadata is cached locally for five minutes. Do not commit caches, browser data, or downloaded content to GitHub.
 
-2026-10-26 开发阶段，抖音视频/图片、小红书视频/11 张图集以及 TikTok、Instagram、YouTube 样例均完成下载和媒体检查。YouTube 样例需要已授权的 Chrome 登录状态；两条抖音视频返回 720p。样例成功不保证所有链接或未来接口永久可用，平台更新可能导致解析失败。第三方样例和个人调试记录不包含在仓库中。
+## Verification and limitations
 
-构建脚本运行原生链接校验与 Python 解析器自检；不自动访问平台或读取 Chrome 登录状态。海外平台需要可用网络，程序不修改系统代理。
+During development on October 26, 2026, sample downloads and media checks passed for Douyin videos/images, a Xiaohongshu video and an 11-image collection, and TikTok, Instagram, and YouTube videos. The YouTube sample required an authorized Chrome login session; two Douyin samples returned 720p video. These results apply to the tested samples, not every link or future platform version. Platform changes may break parsing. Third-party sample media and personal debugging records are not included in this repository.
 
-仅用于备份本人作品及已获授权内容。公开视频不等同于获准下载、转载或商用。请遵守内容授权与平台规则。本项目不是相关平台官方产品，不承诺无水印、最高画质或绕过访问限制。
+The build script runs native link-validation checks and Python parser self-tests. It does not automatically contact platforms or read your Chrome login session. Platforms must be reachable from your network; the app does not change system proxy settings.
 
-## 文件
+Use LinkDrop to back up your own work or content you are authorized to download. Public availability does not grant permission to download, redistribute, or use content commercially. Respect content licenses and platform rules. This is not an official product of any supported platform. It does not promise watermark-free downloads, the highest source quality, or bypassing access restrictions.
 
-- `src/main.swift`：AppKit 界面、全局快捷键、任务管理
-- `src/linkdrop_backend.py`：本地解析与下载、yt-dlp 调用
-- `build.sh`：安装 Python 依赖、编译、自检、本地签名
-- `THIRD-PARTY.md`：第三方依赖与参考来源
+## Project files
 
-项目自有代码采用 [MIT License](LICENSE)，允许使用、修改与再分发。第三方依赖保留各自许可证，详见 [THIRD-PARTY.md](THIRD-PARTY.md)。
+- `src/main.swift`: AppKit interface, global shortcut, and task management
+- `src/linkdrop_backend.py`: Local parsing, downloading, and yt-dlp integration
+- `build.sh`: Python dependency installation, compilation, self-tests, and local signing
+- `THIRD-PARTY.md`: Third-party dependencies and references
+
+## License
+
+Original project code is available under the [MIT License](LICENSE), allowing use, modification, and redistribution. Third-party dependencies retain their own licenses; see [THIRD-PARTY.md](THIRD-PARTY.md).
