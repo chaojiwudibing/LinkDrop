@@ -49,4 +49,4 @@ TikTok / YouTube / Instagram 需要时可手动勾选使用 Chrome 登录状态�
 - `build.sh`：安装 Python 依赖、编译、自检、本地签名
 - `THIRD-PARTY.md`：第三方依赖与参考来源
 
-暂未授予项目自身的开源许可证；第三方依赖保留各自许可证。
+项目自有代码采用 [MIT License](LICENSE)，允许使用、修改与再分发。第三方依赖保留各自许可证，详见 [THIRD-PARTY.md](THIRD-PARTY.md)。
