@@ -139,13 +139,71 @@ def xhs(url):
     return {'id': ident, 'title': note.get('title') or note.get('desc') or ident, 'uploader': note.get('user', {}).get('nickname') or note.get('user', {}).get('nickName',''), 'duration': (note.get('video',{}).get('capa') or {}).get('duration',0), 'extractor': '小红书分享页', 'media': media, 'media_count': len(media), 'media_type': '视频' if note.get('type') == 'video' else '图集', 'quality_note': '平台提供的可用媒体；水印及原画状态以实际文件为准', 'referer': 'https://www.xiaohongshu.com/'}
 
 
+
+DESKTOP = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
+
+
+def tiktok_photo_id(url):
+    if not allowed(url, ('tiktok.com',)): return None
+    match = re.fullmatch(r'/@[^/]+/photo/(\d+)/?', urlsplit(url).path)
+    return match[1] if match else None
+
+
+def tiktok_photo_data(page, ident):
+    match = re.search(r'<script\b[^>]*\bid=["\']__UNIVERSAL_DATA_FOR_REHYDRATION__["\'][^>]*>(.*?)</script>', page, re.S)
+    if not match: raise ValueError('TikTok 未返回图集数据，可能需要验证，请稍后重试。')
+    scope = json.loads(match[1]).get('__DEFAULT_SCOPE__', {})
+    detail = scope.get('webapp.video-detail') or scope.get('webapp.photo-detail') or {}
+    item = (detail.get('itemInfo') or {}).get('itemStruct') or {}
+    if str(item.get('id')) != ident:
+        raise ValueError('TikTok 未返回指定作品，可能已删除、受限或需要验证。')
+    pictures = (item.get('imagePost') or {}).get('images') or []
+    if not pictures: raise ValueError('TikTok 作品没有可下载的图集图片。')
+    media = []
+    for picture in pictures:
+        urls = links((picture.get('imageURL') or {}).get('urlList'))
+        if not urls: raise ValueError('TikTok 图集图片地址不完整，未将部分结果当作完整图集。')
+        media.append({'kind': 'image', 'urls': urls})
+    author = item.get('author') or {}
+    return {'id': ident, 'title': (item.get('imagePost') or {}).get('title') or item.get('desc') or ident,
+            'uploader': author.get('nickname') or author.get('uniqueId', ''), 'duration': 0,
+            'extractor': 'TikTok 图集分享页', 'media': media, 'media_count': len(media),
+            'media_type': '图集', 'quality_note': '保存平台提供的图片；不含背景音乐',
+            'referer': 'https://www.tiktok.com/'}
+
+
+def tiktok_photo(url):
+    ident = tiktok_photo_id(url)
+    if not ident: raise ValueError('无法识别 TikTok 图集链接。')
+    # The video route exposes the same post ID's imagePost data in server-rendered HTML.
+    path = urlsplit(url).path.replace('/photo/', '/video/')
+    s = session()
+    s.headers.update({'User-Agent': DESKTOP, 'Referer': 'https://www.tiktok.com/'})
+    response = s.get('https://www.tiktok.com' + path, timeout=25)
+    response.raise_for_status()
+    return tiktok_photo_data(response.text, ident)
+
+
+def resolve_tiktok_short(url):
+    p = urlsplit(url)
+    if allowed(url, ('tiktok.com',)) and (p.hostname in ('vm.tiktok.com', 'vt.tiktok.com') or p.path.startswith('/t/')):
+        s = session()
+        s.max_redirects = 5
+        response = s.get(url, headers={'User-Agent': DESKTOP}, timeout=20)
+        response.raise_for_status()
+        if not allowed(response.url, ('tiktok.com',)):
+            raise ValueError('TikTok 短链接跳转到了不支持的域名。')
+        return response.url
+    return url
+
+
 def parse(url):
     if not allowed(url): raise ValueError('不支持的链接域名。')
     CACHE.mkdir(parents=True, exist_ok=True, mode=0o700)
     cache = CACHE / (hashlib.sha256(url.encode()).hexdigest() + '.json')
     if cache.exists() and time.time() - cache.stat().st_mtime < 300:
         return json.loads(cache.read_text())
-    d = douyin(url) if allowed(url, ('douyin.com','iesdouyin.com')) else xhs(url)
+    d = tiktok_photo(url) if tiktok_photo_id(url) else douyin(url) if allowed(url, ('douyin.com','iesdouyin.com')) else xhs(url)
     temp = cache.with_suffix('.tmp')
     with temp.open('w') as f:
         os.chmod(temp, 0o600); json.dump(d, f, ensure_ascii=False)
@@ -238,17 +296,19 @@ def self_test():
 
 if __name__=='__main__':
     if '--self-test' in sys.argv: self_test(); sys.exit(0)
-    args=sys.argv[1:]; url=args[-1]
-    if not allowed(url): print('ERROR: 不支持的链接。',file=sys.stderr); sys.exit(1)
-    if not allowed(url,('douyin.com','iesdouyin.com','xiaohongshu.com','xhslink.com','xhslink.cn')):
-        import yt_dlp
-        yt_dlp.main(args)
-    else:
-        try:
+    args=sys.argv[1:]
+    try:
+        if not args or not allowed(args[-1]): raise ValueError('不支持的链接。')
+        url = resolve_tiktok_short(args[-1])
+        args[-1] = url
+        if not tiktok_photo_id(url) and not allowed(url,('douyin.com','iesdouyin.com','xiaohongshu.com','xhslink.com','xhslink.cn')):
+            import yt_dlp
+            yt_dlp.main(args)
+        else:
             d=parse(url)
             if '--dump-single-json' in args: print(json.dumps(d,ensure_ascii=False))
             else:
                 dest=Path(args[args.index('-P')+1]) if '-P' in args else Path.home()/'Downloads/LinkDrop'
                 save(d,dest)
-        except Exception as e:
-            print('ERROR: '+str(e),file=sys.stderr); sys.exit(1)
+    except Exception as e:
+        print('ERROR: '+str(e),file=sys.stderr); sys.exit(1)

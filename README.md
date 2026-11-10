@@ -4,7 +4,7 @@
 
 A macOS menu bar app for saving videos and image collections. Copy a share link or share text, press **Control + Option + V**, resolve the link, and save the media locally.
 
-Supports **Douyin, Xiaohongshu (RedNote), TikTok, YouTube, and Instagram**. Douyin and Xiaohongshu use local parsers; the other platforms use yt-dlp. No third-party parsing service is involved.
+Supports **Douyin, Xiaohongshu (RedNote), TikTok, YouTube, and Instagram**. Douyin, Xiaohongshu, and TikTok photo posts use local parsers; other video links use yt-dlp. No third-party parsing service is involved.
 
 ## Build locally
 
@@ -37,6 +37,18 @@ The app interface is currently in Chinese.
 Images are saved individually, and image collections are also packaged into a ZIP. Closing the window keeps the app in the menu bar. The app handles one post at a time, not entire account profiles. It does not automatically read the clipboard in the background, launch at login, or update itself.
 
 For TikTok, YouTube, and Instagram, you can optionally enable the use of your Chrome login session. This option is off by default and remembers your choice. macOS may request Keychain authorization. Login data is used by the local engine and is not sent to third-party parsing services. Resolved metadata is cached locally for five minutes. Do not commit caches, browser data, or downloaded content to GitHub.
+
+## Diagnostics
+
+Use **打开诊断日志** (Open diagnostic logs) in the menu bar menu to open `~/Library/Logs/LinkDrop/`. The app records task start/end, exit status, cancellation, timeout, and structured errors. URLs, sensitive diagnostic lines, and the home-directory prefix are redacted. Raw parser JSON and browser cookies are not written to logs. Log files are restricted to the current user and rotate at approximately 1 MiB, retaining one previous file.
+
+TikTok `/photo/` posts and supported TikTok short links now resolve to individual images and a ZIP. Background music is not included. On November 10, 2026, the reported five-image TikTok post was downloaded and all five images and the ZIP passed integrity checks.
+
+Run offline regression checks with:
+
+```sh
+.venv/bin/python -m unittest discover -s tests -v
+```
 
 ## Verification and limitations
 

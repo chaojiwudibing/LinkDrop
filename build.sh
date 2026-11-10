@@ -28,5 +28,6 @@ chmod +x "$RES/yt-dlp"
 swiftc src/main.swift -o "$APP/Contents/MacOS/LinkDrop" -framework Cocoa -framework Carbon
 "$APP/Contents/MacOS/LinkDrop" --self-test
 "$RES/yt-dlp" --self-test
+.venv/bin/python -m unittest discover -s tests -v
 codesign --force --sign - "$APP"
 printf 'Built: %s\nKeep this checkout and its .venv in place. This is a local build, not a portable app.\n' "$APP"

@@ -1,6 +1,43 @@
 import Cocoa
 import Carbon
 
+
+// Local diagnostics: bounded, private files; never persist raw JSON or browser cookies.
+func redactLog(_ text: String) -> String {
+    var value = text.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+    for (pattern, replacement) in [
+        (#"https?://[^\s<>\"']+"#, "<URL>"),
+        (#"(?i)(cookie|authorization|token|password|secret)[^\r\n]*"#, "<sensitive detail redacted>")
+    ] {
+        if let regex = try? NSRegularExpression(pattern: pattern) {
+            value = regex.stringByReplacingMatches(in: value, range: NSRange(value.startIndex..., in: value), withTemplate: replacement)
+        }
+    }
+    return String(value.prefix(4000))
+}
+let logDirectory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/LinkDrop")
+func writeLog(_ event: String) {
+    let fm = FileManager.default
+    let file = logDirectory.appendingPathComponent("LinkDrop.log")
+    do {
+        try fm.createDirectory(at: logDirectory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        if let size = (try? fm.attributesOfItem(atPath: file.path)[.size]) as? NSNumber, size.intValue > 1_048_576 {
+            let old = logDirectory.appendingPathComponent("LinkDrop.previous.log")
+            if fm.fileExists(atPath: old.path) { try fm.removeItem(at: old) }
+            try fm.moveItem(at: file, to: old)
+        }
+        if !fm.fileExists(atPath: file.path) { fm.createFile(atPath: file.path, contents: nil, attributes: [.posixPermissions: 0o600]) }
+        let handle = try FileHandle(forWritingTo: file)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data("\(ISO8601DateFormatter().string(from: Date())) \(redactLog(event))\n".utf8))
+    } catch { NSLog("LinkDrop: unable to write local diagnostics") }
+}
+func errorSummary(_ output: String) -> String {
+    let lines = output.components(separatedBy: .newlines).filter { $0.hasPrefix("ERROR:") || $0.hasPrefix("WARNING:") }
+    return lines.isEmpty ? "No structured error returned; inspect the app window." : lines.suffix(8).joined(separator: "\n")
+}
+
 func extractLink(_ text: String) -> String? {
     let detector = try! NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
     let allowed = ["douyin.com", "iesdouyin.com", "xiaohongshu.com", "xhslink.com", "xhslink.cn", "tiktok.com", "youtube.com", "youtu.be", "instagram.com"]
@@ -14,7 +51,10 @@ if CommandLine.arguments.contains("--self-test") {
     assert(extractLink("复制 https://v.douyin.com/abc/ 分享") == "https://v.douyin.com/abc/")
     for site in ["www.xiaohongshu.com", "xhslink.com", "xhslink.cn", "www.tiktok.com", "youtu.be", "www.youtube.com", "www.instagram.com"] { assert(extractLink("https://\(site)/test") != nil) }
     for link in ["https://youtube.com.evil.test/x", "file:///tmp/a", "https://evil.test/youtube.com", "https://user:pass@youtube.com/x", "nothing"] { assert(extractLink(link) == nil) }
-    print("PASS: platform link validation")
+    let sample = redactLog("ERROR: https://example.com/?token=secret \(NSHomeDirectory())/Downloads Cookie: private")
+    assert(!sample.contains("example.com") && !sample.contains("secret") && !sample.contains(NSHomeDirectory()) && !sample.contains("private"))
+    assert(errorSummary("{\"private\":true}\nERROR: failure") == "ERROR: failure")
+    print("PASS: platform link validation and diagnostic redaction")
     exit(0)
 }
 
@@ -49,6 +89,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let menu = NSMenu()
         menu.addItem(withTitle: "打开 LinkDrop  ⌃⌥V", action: #selector(show), keyEquivalent: "") .target = self
         menu.addItem(withTitle: "打开下载文件夹", action: #selector(folder), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "打开诊断日志", action: #selector(logFolder), keyEquivalent: "").target = self
         menu.addItem(NSMenuItem.separator())
         menu.addItem(withTitle: "退出", action: #selector(quit), keyEquivalent: "q").target = self
         item.menu = menu
@@ -91,6 +132,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }, 1, &spec, Unmanaged.passUnretained(self).toOpaque(), nil)
         let result = RegisterEventHotKey(UInt32(kVK_ANSI_V), UInt32(controlKey | optionKey), EventHotKeyID(signature: 0x4c445250, id: 1), GetApplicationEventTarget(), 0, &hotkey)
         if result != noErr { status.stringValue = "快捷键被占用，请点击菜单栏图标打开。" }
+        writeLog("app started")
         show()
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { show(); return true }
@@ -98,6 +140,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc func cookieChanged() { UserDefaults.standard.set(cookies.state == .on, forKey: "useChromeCookies") }
     @objc func paste() { input.stringValue = NSPasteboard.general.string(forType: .string) ?? ""; parsed = nil; download.isEnabled = false }
     @objc func folder() { try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true); NSWorkspace.shared.open(directory) }
+    @objc func logFolder() { writeLog("diagnostics opened"); NSWorkspace.shared.open(logDirectory) }
     @objc func quit() { process?.terminate(); NSApp.terminate(nil) }
     @objc func stop() { cancelled = true; process?.terminate(); status.stringValue = "正在取消…" }
     @objc func analyze() {
@@ -131,7 +174,8 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
         process = p; job = UUID(); let token = job; cancelled = false; timedOut = false
         parse.isEnabled = false; download.isEnabled = false; input.isEnabled = false; cookies.isEnabled = false; cancel.isEnabled = true
         detail.string = ""; status.stringValue = downloading ? "正在下载…" : "正在解析链接…"
-        do { try p.run() } catch { finish(); status.stringValue = "无法启动：\(error.localizedDescription)"; return }
+        writeLog("job \(token) started action=\(downloading ? "download" : "parse") host=\(host)")
+        do { try p.run() } catch { writeLog("job \(token) launch failed: \(error.localizedDescription)"); finish(); status.stringValue = "无法启动：\(error.localizedDescription)"; return }
         DispatchQueue.main.asyncAfter(deadline: .now() + (downloading ? 1800 : 100)) { [weak self] in
             guard let self = self, self.job == token, self.process != nil else { return }
             self.timedOut = true; self.process?.terminate()
@@ -147,6 +191,8 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let output = String(decoding: all, as: UTF8.self)
             DispatchQueue.main.async {
                 let aborted = self.cancelled; let timeout = self.timedOut
+                writeLog("job \(token) finished exit=\(p.terminationStatus) cancelled=\(aborted) timeout=\(timeout)")
+                if p.terminationStatus != 0 { writeLog(errorSummary(output)) }
                 self.finish()
                 if aborted || timeout { self.status.stringValue = aborted ? "已取消。" : "请求超时，请检查网络后重试。"; self.detail.string = output; return }
                 guard p.terminationStatus == 0 else {
@@ -156,7 +202,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 if downloading { self.status.stringValue = "下载完成 · 已保存到 下载/LinkDrop"; self.download.isEnabled = true }
                 else {
                     let jsonLine = output.components(separatedBy: .newlines).last(where: { $0.hasPrefix("{") }) ?? ""
-                    guard let data = jsonLine.data(using: .utf8), let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let title = json["title"] as? String else { self.status.stringValue = "无法读取解析结果。"; self.detail.string = output; return }
+                    guard let data = jsonLine.data(using: .utf8), let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let title = json["title"] as? String else { writeLog("job \(token) failed: invalid parser JSON"); self.status.stringValue = "无法读取解析结果。"; self.detail.string = output; return }
                     self.parsed = link; self.download.isEnabled = true
                     self.status.stringValue = "解析完成 · \(json["media_type"] as? String ?? "视频") · \(json["media_count"] as? Int ?? 1) 个文件"
                     self.detail.string = "\(title)\n\n作者：\(json["uploader"] as? String ?? "未知")\n时长：\(json["duration"] ?? "未知") 秒\n平台：\(json["extractor"] ?? "未知")\n\(json["quality_note"] as? String ?? "按平台提供的最佳可用画质下载")\n\n保存位置：\(self.directory.path)"
